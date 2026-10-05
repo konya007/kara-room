@@ -1,0 +1,43 @@
+{
+  "DWM7HS": {
+    "code": "DWM7HS",
+    "createdAt": 1791215298803,
+    "hostUserId": "u-qsbn229h-muvfc5k7",
+    "settings": {
+      "maxUsers": 12,
+      "maxSingerSlots": 2,
+      "selectionMode": "free",
+      "allowMemberAddSong": true
+    },
+    "users": {
+      "u-qsbn229h-muvfc5k7": {
+        "id": "u-qsbn229h-muvfc5k7",
+        "nickname": "test",
+        "socketId": "",
+        "joinedAt": 1791215298803,
+        "isHost": true,
+        "isOnline": false,
+        "wantToSing": false
+      }
+    },
+    "singerSlots": [
+      {
+        "slotIndex": 0,
+        "userId": null
+      },
+      {
+        "slotIndex": 1,
+        "userId": null
+      }
+    ],
+    "queue": [],
+    "currentSong": null,
+    "timeline": {
+      "videoId": null,
+      "positionSec": 0,
+      "serverTimeMs": 1791215298803,
+      "playing": false
+    },
+    "scoring": null
+  }
+}

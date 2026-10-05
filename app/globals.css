@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #0B0A10;
+  --surface: #15131D;
+  --surface-raised: #1F1C2B;
+  --border: #2E2A3D;
+  --text: #F4F1FA;
+  --text-muted: #9C96B0;
+  --accent: #FF3D81;
+  --live: #3DF5C4;
+  --score: #FFC247;
+  --danger: #FF5C5C;
+}
+
+@theme {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-border: var(--border);
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-live: var(--live);
+  --color-score: var(--score);
+  --color-danger: var(--danger);
+
+  --font-display: var(--font-unbounded), sans-serif;
+  --font-body: var(--font-be-vietnam-pro), sans-serif;
+  --font-mono: var(--font-jetbrains-mono), monospace;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  overflow-x: hidden;
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Thang cỡ chữ chuẩn: 12, 14, 16, 20, 28, 40, 72 (px) */
+.font-display {
+  font-family: var(--font-display);
+}
+
+.font-body {
+  font-family: var(--font-body);
+}
+
+.font-mono-tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Bo góc quy chuẩn */
+.rounded-btn {
+  border-radius: 8px;
+}
+.rounded-panel {
+  border-radius: 16px;
+}
+.rounded-full-slot {
+  border-radius: 9999px;
+}
+
+/* Tôn trọng prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "KaraRoom",
+  "description": "Nền tảng phòng karaoke realtime đồng bộ nhạc YouTube và giọng hát WebRTC với độ trễ thấp.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
