@@ -291,16 +291,29 @@ export function advanceSongOnEnded(
   voiceActivityRatio: number = 0.5,
   nowMs: number = Date.now()
 ): { state: RoomState; scoringStarted: boolean } {
-  if (!state.currentSong) {
+  if (!state.currentSong || state.scoring) {
     return { state, scoringStarted: false };
   }
 
   // Lấy danh sách người đang ở các slot hát
-  const activeSingers = state.singerSlots
+  let activeSingers = state.singerSlots
     .map((slot) => (slot.userId ? state.users[slot.userId] : null))
     .filter((u): u is NonNullable<typeof u> => Boolean(u && u.isOnline));
 
-  // Nếu có người hát, chuyển sang trạng thái chấm điểm trong 10 giây
+  // Nếu chưa có ai lấy slot nhưng bài hát kết thúc, lấy người đã thêm bài hoặc thành viên online trong phòng
+  if (activeSingers.length === 0) {
+    const addedByUser = state.currentSong.addedByUserId ? state.users[state.currentSong.addedByUserId] : null;
+    if (addedByUser && addedByUser.isOnline) {
+      activeSingers = [addedByUser];
+    } else {
+      const firstOnlineUser = Object.values(state.users).find((u) => u.isOnline);
+      if (firstOnlineUser) {
+        activeSingers = [firstOnlineUser];
+      }
+    }
+  }
+
+  // Nếu có người hát / người trong phòng, chuyển sang trạng thái chấm điểm trong 10 giây
   if (activeSingers.length > 0) {
     const score = calculateScore(voiceActivityRatio);
     const scoreResult: ScoreResult = {

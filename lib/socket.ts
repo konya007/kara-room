@@ -22,6 +22,17 @@ export function getSocket(): Socket {
 
     clockSyncInstance = new ClockSync(socketInstance);
     clockSyncInstance.start();
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("pageshow", (event) => {
+        // Tự động khôi phục kết nối WebSocket khi trang được nạp lại từ bfcache (Back-Forward Cache)
+        if (event.persisted && socketInstance) {
+          if (!socketInstance.connected) {
+            socketInstance.connect();
+          }
+        }
+      });
+    }
   }
   return socketInstance;
 }

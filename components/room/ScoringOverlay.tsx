@@ -16,12 +16,15 @@ export const ScoringOverlay: React.FC<ScoringOverlayProps> = ({ scoring }) => {
   const [displayScore, setDisplayScore] = useState(0);
   const [remainingSec, setRemainingSec] = useState(10);
 
+  const scoringKey = scoring ? `${scoring.announcedAt}-${scoring.songTitle}-${scoring.score}` : null;
+
   useEffect(() => {
     if (!scoring) return;
 
     let animId: number;
     const targetScore = scoring.score;
-    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const prefersReducedMotion =
+      typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     if (prefersReducedMotion) {
       animId = requestAnimationFrame(() => {
@@ -45,15 +48,23 @@ export const ScoringOverlay: React.FC<ScoringOverlayProps> = ({ scoring }) => {
       animId = requestAnimationFrame(animate);
     }
 
+    const calcRemaining = () => {
+      const duration = scoring.durationSec || 10;
+      const elapsedSec = Math.max(0, (Date.now() - scoring.announcedAt) / 1000);
+      return Math.max(0, Math.ceil(duration - elapsedSec));
+    };
+
+    setRemainingSec(calcRemaining());
+
     const interval = setInterval(() => {
-      setRemainingSec((prev) => Math.max(0, prev - 1));
+      setRemainingSec(calcRemaining());
     }, 1000);
 
     return () => {
       if (animId) cancelAnimationFrame(animId);
       clearInterval(interval);
     };
-  }, [scoring]);
+  }, [scoringKey]);
 
   if (!scoring) return null;
 

@@ -265,5 +265,27 @@ describe("Song Queue & Slot Pure Functions", () => {
     expect(rFinished.timeline.countdown).toBeNull();
     expect(rFinished.timeline.positionSec).toBe(35);
   });
+
+  it("hết bài khi chưa ai lên slot vẫn chấm điểm cho người thêm bài hoặc người trong phòng", () => {
+    const room = createRoom("ABC123", { id: "u1", nickname: "Tuấn", socketId: "s1" }, 1000);
+    const { state: rSong } = addSong(
+      room,
+      "u1",
+      { videoId: "v1", title: "Bài Solo", durationSec: 120, thumbnail: "" },
+      1000
+    );
+    // Không có ai gọi takeSingerSlot (singerSlots trống)
+    expect(rSong.singerSlots.every((s) => s.userId === null)).toBe(true);
+
+    const { state: rScoring, scoringStarted } = advanceSongOnEnded(rSong, 0.75, 5000);
+    expect(scoringStarted).toBe(true);
+    expect(rScoring.scoring).not.toBeNull();
+    expect(rScoring.scoring?.singers.length).toBe(1);
+    expect(rScoring.scoring?.singers[0].userId).toBe("u1");
+
+    // Thử gọi advanceSongOnEnded lần nữa khi đang scoring -> phải bỏ qua
+    const { scoringStarted: duplicateScoring } = advanceSongOnEnded(rScoring, 0.9, 6000);
+    expect(duplicateScoring).toBe(false);
+  });
 });
 

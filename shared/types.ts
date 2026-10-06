@@ -196,6 +196,9 @@ export const RtcSignalPayloadSchema = z.object({
         sdpMLineIndex: z.number().nullable().optional(),
       }),
     }),
+    z.object({
+      type: z.literal("request-stream"),
+    }),
   ]),
 });
 export type RtcSignalPayload = z.infer<typeof RtcSignalPayloadSchema>;

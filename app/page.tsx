@@ -127,6 +127,12 @@ export default function KaraRoomPage() {
   }, [store.roomState?.code, store.hasUserGesture]);
 
   // 4. Đồng bộ ca sĩ: Khi người dùng được xếp vào slot hát hoặc rời slot
+  const onlineUsersKey = Object.values(store.roomState?.users || {})
+    .filter((u) => u.isOnline)
+    .map((u) => u.id)
+    .sort()
+    .join(",");
+
   useEffect(() => {
     if (!store.roomState || !store.hasUserGesture) return;
 
@@ -173,7 +179,24 @@ export default function KaraRoomPage() {
         micIntervalRef.current = null;
       }
     }
-  }, [store.roomState?.singerSlots, store.hasUserGesture]);
+  }, [store.roomState?.singerSlots, store.hasUserGesture, onlineUsersKey]);
+
+  // 4b. Khán giả chủ động gửi "request-stream" tới các ca sĩ đang trên slot ngay khi vào phòng
+  const singerSlotsKey = store.roomState?.singerSlots.map((s) => s.userId || "").join(",") || "";
+  useEffect(() => {
+    if (!store.roomState || !store.hasUserGesture) return;
+
+    const mySlot = store.roomState.singerSlots.find((s) => s.userId === store.userId);
+    if (mySlot) return; // Nếu mình là ca sĩ thì không request stream
+
+    const activeSingers = store.roomState.singerSlots
+      .map((s) => s.userId)
+      .filter((id): id is string => Boolean(id && id !== store.userId));
+
+    for (const singerId of activeSingers) {
+      voiceTransportRef.current.requestStream(singerId);
+    }
+  }, [store.roomState?.code, store.hasUserGesture, singerSlotsKey]);
 
   // Cập nhật âm lượng giọng hát từ xa
   useEffect(() => {
@@ -321,6 +344,7 @@ export default function KaraRoomPage() {
           <VideoPlayer
             timeline={store.roomState.timeline}
             songTitle={store.roomState.currentSong?.title}
+            durationSec={store.roomState.currentSong?.durationSec}
             isSinger={isSinger}
             canControlPlayback={canControlPlayback}
             audienceDelayMs={store.audienceDelayMs}
@@ -353,6 +377,8 @@ export default function KaraRoomPage() {
             isMicActive={store.isMicActive}
             isMonitorActive={store.isMonitorActive}
             localVolumeLevel={store.voiceVolumeLevel}
+            musicVolume={store.musicVolume}
+            onUpdateMusicVolume={store.setMusicVolume}
             vocalVolume={store.vocalVolume}
             onUpdateVocalVolume={store.setVocalVolume}
             onTakeSlot={(slotIndex) => socket.emit(SOCKET_EVENTS.SLOT_TAKE, { slotIndex })}

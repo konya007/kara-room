@@ -64,11 +64,36 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      // Nếu WEB client không có streaming_data, thử lại với ANDROID client
-      if (!info?.streaming_data) {
+      const findVideoAudioFormat = (mediaInfo: any) => {
+        if (!mediaInfo) return null;
+        const attempts = [
+          { type: "video+audio", quality: "360p" },
+          { type: "video+audio", quality: "best" },
+          { type: "video+audio", quality: "worst" },
+          { type: "video+audio" },
+        ];
+        for (const criteria of attempts) {
+          try {
+            const f = mediaInfo.chooseFormat(criteria);
+            if (f) return f;
+          } catch {
+            // Tiếp tục thử tiêu chí kế tiếp nếu throw No matching formats
+          }
+        }
+        if (mediaInfo.streaming_data?.formats?.length) {
+          return mediaInfo.streaming_data.formats[0];
+        }
+        return null;
+      };
+
+      let format = findVideoAudioFormat(info);
+
+      // Nếu WEB client không có format muxed video+audio, fallback sang ANDROID client
+      if (!format) {
         try {
           const androidInfo = await yt.getBasicInfo(videoId, { client: "ANDROID" });
-          if (androidInfo?.streaming_data) {
+          format = findVideoAudioFormat(androidInfo);
+          if (format) {
             info = androidInfo;
           }
         } catch {
@@ -76,34 +101,49 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      // Nếu vẫn không có dữ liệu stream (video nhạc bản quyền / VEVO / DRM)
-      if (!info?.streaming_data) {
-        console.warn(`[YouTubeStreamAPI] Video ${videoId} không có streaming_data. Đề xuất phát qua NoCookie.`);
-        return new NextResponse("streaming_not_available", { status: 422 });
-      }
-
-      let format;
-      try {
-        format =
-          info.chooseFormat({ type: "video+audio", quality: "360p" }) ||
-          info.chooseFormat({ type: "video+audio", quality: "best" }) ||
-          info.chooseFormat({ type: "audio", quality: "best" });
-      } catch {
-        format = null;
-      }
-
+      // Nếu vẫn chưa có, thử client YTMUSIC
       if (!format) {
-        console.warn(`[YouTubeStreamAPI] Không chọn được format cho video ${videoId}. Đề xuất NoCookie.`);
+        try {
+          const ytMusicInfo = await yt.getBasicInfo(videoId, { client: "YTMUSIC" });
+          format = findVideoAudioFormat(ytMusicInfo);
+          if (format) {
+            info = ytMusicInfo;
+          }
+        } catch {
+          // Bỏ qua
+        }
+      }
+
+      // Cuối cùng thử tìm audio nếu không có video
+      if (!format) {
+        try {
+          format =
+            info?.chooseFormat({ type: "audio", quality: "best" }) ||
+            info?.chooseFormat({ type: "audio" });
+        } catch {
+          format = null;
+        }
+      }
+
+      // Nếu vẫn không có dữ liệu stream (video nhạc bản quyền / VEVO / DRM)
+      if (!format) {
+        console.warn(`[YouTubeStreamAPI] Video ${videoId} không có định dạng phát trực tiếp khả dụng. Đề xuất phát qua NoCookie.`);
         return new NextResponse("streaming_not_available", { status: 422 });
       }
 
-      const deciphered = await format.decipher(yt.session.player);
-      if (!deciphered) {
-        console.warn(`[YouTubeStreamAPI] Không thể decipher stream cho video ${videoId}.`);
-        return new NextResponse("streaming_not_available", { status: 422 });
+      let extractedUrl = "";
+      if (format.url) {
+        extractedUrl = format.url;
+      } else {
+        const deciphered = await format.decipher(yt.session.player);
+        if (!deciphered) {
+          console.warn(`[YouTubeStreamAPI] Không thể decipher stream cho video ${videoId}.`);
+          return new NextResponse("streaming_not_available", { status: 422 });
+        }
+        extractedUrl = deciphered;
       }
 
-      directUrl = deciphered;
+      directUrl = extractedUrl;
       // Cache trong 45 phút
       streamUrlCache.set(videoId, {
         url: directUrl,
@@ -123,6 +163,13 @@ export async function GET(req: NextRequest) {
 
     const upstreamRes = await fetch(directUrl, { headers });
 
+    if (!upstreamRes.ok && upstreamRes.status !== 206) {
+      // Nếu Google Video từ chối (403/404/v.v.), xóa cache và trả về 422 để fallback NoCookie
+      streamUrlCache.delete(videoId);
+      console.warn(`[YouTubeStreamAPI] Upstream stream trả về mã ${upstreamRes.status} cho video ${videoId}. Chuyển sang NoCookie.`);
+      return new NextResponse("streaming_not_available", { status: 422 });
+    }
+
     // 3. Trả về luồng dữ liệu cho thẻ <video>
     const responseHeaders = new Headers();
     responseHeaders.set("Content-Type", upstreamRes.headers.get("content-type") || "video/mp4");
@@ -141,6 +188,7 @@ export async function GET(req: NextRequest) {
     });
   } catch (err) {
     console.warn(`[YouTubeStreamAPI] Lỗi khi xử lý stream video ${videoId}:`, (err as Error).message);
+    streamUrlCache.delete(videoId);
     return new NextResponse("streaming_not_available", { status: 422 });
   }
 }

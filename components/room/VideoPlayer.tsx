@@ -29,6 +29,7 @@ import { CountdownOverlay } from "./CountdownOverlay";
 interface VideoPlayerProps {
   timeline: Timeline | null;
   songTitle?: string;
+  durationSec?: number;
   isSinger: boolean;
   canControlPlayback?: boolean;
   audienceDelayMs: number;
@@ -44,6 +45,7 @@ interface VideoPlayerProps {
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   timeline,
   songTitle,
+  durationSec: propDurationSec = 0,
   isSinger,
   canControlPlayback = false,
   audienceDelayMs,
@@ -57,10 +59,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const hasEndedRef = useRef(false);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTimeSec, setCurrentTimeSec] = useState(0);
-  const [durationSec, setDurationSec] = useState(0);
+  const [mediaDurationSec, setMediaDurationSec] = useState(0);
   const [isLoadingMedia, setIsLoadingMedia] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -68,11 +72,28 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [playerEngine, setPlayerEngine] = useState<"native" | "nocookie">("native");
   const [prevVideoId, setPrevVideoId] = useState(timeline?.videoId);
 
+  const durationSec = propDurationSec || mediaDurationSec || 0;
+
+  // Gửi lệnh điều khiển tới YouTube NoCookie Iframe qua postMessage
+  const sendIframeCommand = useCallback((func: string, args: any[] = []) => {
+    if (iframeRef.current?.contentWindow) {
+      try {
+        iframeRef.current.contentWindow.postMessage(
+          JSON.stringify({ event: "command", func, args }),
+          "*"
+        );
+      } catch (err) {
+        console.warn("[VideoPlayer] Không thể gửi lệnh tới YouTube iframe:", err);
+      }
+    }
+  }, []);
+
   // Điều chỉnh state khi đổi bài hát mà không gây cascading render trong effect
   if (timeline?.videoId !== prevVideoId) {
     setPrevVideoId(timeline?.videoId);
     setPlayerEngine("native");
     setErrorMessage(null);
+    hasEndedRef.current = false;
   }
 
   const driftIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -83,12 +104,68 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     ? `/api/youtube/stream?videoId=${timeline.videoId}`
     : undefined;
 
-  // 1. Đồng bộ âm lượng
+  // 1. Đồng bộ âm lượng cho cả Native Video và YouTube NoCookie Iframe
   useEffect(() => {
+    // A. Native Video
     if (videoRef.current) {
       videoRef.current.volume = isMuted ? 0 : Math.max(0, Math.min(1, musicVolume));
     }
-  }, [musicVolume, isMuted]);
+    // B. YouTube NoCookie Iframe
+    if (playerEngine === "nocookie") {
+      if (isMuted) {
+        sendIframeCommand("mute");
+      } else {
+        sendIframeCommand("unMute");
+        sendIframeCommand("setVolume", [Math.round(Math.max(0, Math.min(1, musicVolume)) * 100)]);
+      }
+    }
+  }, [musicVolume, isMuted, playerEngine, sendIframeCommand]);
+
+  // Tính toán vị trí mục tiêu hiện tại (giây) theo đồng hồ phòng
+  const getTargetPositionSec = useCallback(() => {
+    if (!timeline?.videoId) return 0;
+    const clock = getClockSync();
+    const serverNow = clock.nowServerTime();
+    return calculateTargetPositionSec({
+      timeline,
+      serverNowMs: serverNow,
+      isSinger,
+      audienceDelayMs,
+      manualOffsetMs,
+    });
+  }, [timeline, isSinger, audienceDelayMs, manualOffsetMs]);
+
+  // Đồng bộ vị trí và trạng thái play/pause của thẻ video
+  const syncVideoState = useCallback(
+    (forcePlay: boolean = false) => {
+      const video = videoRef.current;
+      if (!video || !timeline?.videoId || video.readyState < 1) return;
+
+      const targetSec = getTargetPositionSec();
+      const isCountdownActive = Boolean(timeline.countdown?.active);
+      const shouldPlay = timeline.playing && !isCountdownActive;
+
+      // Khi chênh lệch quá 0.5s hoặc mới load xong: Seek chính xác tới vị trí đích
+      if (Math.abs(video.currentTime - targetSec) > 0.5) {
+        try {
+          video.currentTime = targetSec;
+        } catch (err) {
+          console.warn("[VideoPlayer] Chưa thể seek tới targetSec:", err);
+        }
+      }
+
+      if (!shouldPlay) {
+        if (!video.paused) {
+          video.pause();
+        }
+      } else {
+        if (forcePlay || video.paused) {
+          video.play().catch(() => {});
+        }
+      }
+    },
+    [getTargetPositionSec, timeline?.playing, timeline?.countdown?.active, timeline?.videoId]
+  );
 
   // 2. Chuyển bài hoặc tải video mới hoặc đồng bộ play/pause/countdown
   useEffect(() => {
@@ -102,30 +179,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     if (playerEngine === "native" && videoRef.current) {
       setIsLoadingMedia(true);
-      const clock = getClockSync();
-      const serverNow = clock.nowServerTime();
-      const targetSec = calculateTargetPositionSec({
-        timeline,
-        serverNowMs: serverNow,
-        isSinger,
-        audienceDelayMs,
-        manualOffsetMs,
-      });
-
-      const isCountdownActive = Boolean(timeline.countdown?.active);
-      const shouldPlay = timeline.playing && !isCountdownActive;
-
-      if (!shouldPlay) {
-        videoRef.current.pause();
-        if (Math.abs(videoRef.current.currentTime - targetSec) > 0.5) {
-          videoRef.current.currentTime = targetSec;
-        }
-      } else {
-        if (Math.abs(videoRef.current.currentTime - targetSec) > 1.5) {
-          videoRef.current.currentTime = targetSec;
-        }
-        videoRef.current.play().catch(() => {});
-      }
+      syncVideoState();
     }
   }, [
     timeline?.videoId,
@@ -133,9 +187,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     timeline?.positionSec,
     timeline?.countdown?.active,
     playerEngine,
-    isSinger,
-    audienceDelayMs,
-    manualOffsetMs,
+    syncVideoState,
   ]);
 
   // 3. Vòng lặp kiểm tra độ trôi mỗi 500ms
@@ -147,17 +199,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     driftIntervalRef.current = setInterval(() => {
       const video = videoRef.current;
       if (!video || !timeline?.videoId || !timeline.playing || timeline.countdown?.active) return;
+      if (video.readyState < 1) return;
 
-      const clock = getClockSync();
-      const serverNow = clock.nowServerTime();
-      const targetSec = calculateTargetPositionSec({
-        timeline,
-        serverNowMs: serverNow,
-        isSinger,
-        audienceDelayMs,
-        manualOffsetMs,
-      });
-
+      const targetSec = getTargetPositionSec();
       const currentSec = video.currentTime;
       const decision = decideDriftAction(currentSec, targetSec, isSinger, [0.8, 0.9, 1.0, 1.15, 1.25]);
 
@@ -166,7 +210,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       }
 
       if (decision.type === "seek") {
-        video.currentTime = decision.targetSec;
+        try {
+          video.currentTime = decision.targetSec;
+        } catch {}
       } else if (decision.type === "rate") {
         video.playbackRate = decision.rate;
 
@@ -183,21 +229,70 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       if (driftIntervalRef.current) clearInterval(driftIntervalRef.current);
       if (rateResetTimeoutRef.current) clearTimeout(rateResetTimeoutRef.current);
     };
-  }, [timeline, isSinger, audienceDelayMs, manualOffsetMs, playerEngine, onDriftUpdated]);
+  }, [timeline, isSinger, playerEngine, onDriftUpdated, getTargetPositionSec]);
 
   // 4. Các sự kiện Native Video
+  const handleMediaLoaded = () => {
+    setIsLoadingMedia(false);
+    syncVideoState(true);
+  };
+
   const handleTimeUpdate = () => {
     if (videoRef.current) {
       setCurrentTimeSec(videoRef.current.currentTime);
       if (videoRef.current.duration && !isNaN(videoRef.current.duration)) {
-        setDurationSec(videoRef.current.duration);
+        setMediaDurationSec(videoRef.current.duration);
       }
     }
   };
 
-  const handleVideoEnded = () => {
+  const handleVideoEnded = useCallback(() => {
+    if (hasEndedRef.current) return;
+    hasEndedRef.current = true;
     onSongEnded();
-  };
+  }, [onSongEnded]);
+
+  // Theo dõi tiến trình thời gian và tự động kết thúc bài khi chạm mốc durationSec
+  useEffect(() => {
+    if (!timeline?.videoId || !timeline.playing || timeline.countdown?.active) return;
+
+    const interval = setInterval(() => {
+      const targetSec = getTargetPositionSec();
+      if (playerEngine === "nocookie") {
+        setCurrentTimeSec(targetSec);
+      }
+
+      const totalDuration = durationSec || 0;
+      if (totalDuration > 0 && targetSec >= totalDuration - 0.5) {
+        handleVideoEnded();
+      }
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [
+    timeline?.videoId,
+    timeline?.playing,
+    timeline?.countdown?.active,
+    playerEngine,
+    durationSec,
+    getTargetPositionSec,
+    handleVideoEnded,
+  ]);
+
+  // Lắng nghe sự kiện kết thúc phát từ YouTube NoCookie Iframe qua postMessage
+  useEffect(() => {
+    const handleWindowMessage = (event: MessageEvent) => {
+      try {
+        const data = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+        if (data?.event === "onStateChange" && (data?.info === 0 || data?.data === 0)) {
+          handleVideoEnded();
+        }
+      } catch {}
+    };
+
+    window.addEventListener("message", handleWindowMessage);
+    return () => window.removeEventListener("message", handleWindowMessage);
+  }, [handleVideoEnded]);
 
   const handleVideoError = () => {
     setIsLoadingMedia(false);
@@ -224,6 +319,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return `${mins}:${secs < 10 ? "0" : ""}${secs}`;
   };
 
+  const nocookieStartSec = Math.max(0, Math.floor(getTargetPositionSec()));
+
   return (
     <div
       ref={containerRef}
@@ -236,7 +333,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           src={mediaStreamSrc}
           playsInline
           autoPlay
-          onLoadedData={() => setIsLoadingMedia(false)}
+          onLoadedMetadata={handleMediaLoaded}
+          onCanPlay={handleMediaLoaded}
+          onLoadedData={handleMediaLoaded}
           onWaiting={() => setIsLoadingMedia(true)}
           onPlaying={() => {
             setIsLoadingMedia(false);
@@ -250,12 +349,22 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         />
       )}
 
-      {/* 2. Dự phòng: Iframe YouTube NoCookie (nếu người dùng bấm chuyển đổi) */}
+      {/* 2. Dự phòng: Iframe YouTube NoCookie (tự động phát đúng giây đang phát) */}
       {playerEngine === "nocookie" && timeline?.videoId && (
         <iframe
-          src={`https://www.youtube-nocookie.com/embed/${timeline.videoId}?autoplay=1&enablejsapi=1&controls=0&modestbranding=1&rel=0`}
+          ref={iframeRef}
+          key={`${timeline.videoId}-${nocookieStartSec}`}
+          src={`https://www.youtube-nocookie.com/embed/${timeline.videoId}?autoplay=1&start=${nocookieStartSec}&enablejsapi=1&controls=0&modestbranding=1&rel=0`}
           title="KaraRoom Video Player"
           allow="autoplay; encrypted-media"
+          onLoad={() => {
+            if (isMuted) {
+              sendIframeCommand("mute");
+            } else {
+              sendIframeCommand("unMute");
+              sendIframeCommand("setVolume", [Math.round(Math.max(0, Math.min(1, musicVolume)) * 100)]);
+            }
+          }}
           className="w-full h-full border-0 pointer-events-auto"
         />
       )}
@@ -338,9 +447,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
       )}
 
-      {/* 7. Thanh điều khiển dưới đáy (Custom Controls Overlay) */}
-      {timeline?.videoId && playerEngine === "native" && (
-        <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black/90 via-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-20 space-y-2">
+      {/* 7. Thanh điều khiển dưới đáy (Custom Controls Overlay) - Hiển thị cho cả Native và NoCookie */}
+      {timeline?.videoId && (
+        <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black/95 via-black/60 to-transparent opacity-95 sm:opacity-85 sm:hover:opacity-100 transition-opacity duration-200 z-20 space-y-2 pointer-events-auto">
           {/* Thanh tiến trình (Scrubber Bar) */}
           <div className="w-full flex items-center gap-2">
             <div className="relative flex-1 h-1.5 bg-white/20 rounded-full overflow-hidden cursor-pointer">
@@ -363,7 +472,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 type="button"
                 aria-label={timeline?.playing ? "Tạm dừng" : "Phát"}
                 disabled={!canControlPlayback}
-                onClick={onTogglePlayPause}
+                onClick={() => {
+                  if (onTogglePlayPause) onTogglePlayPause();
+                  if (playerEngine === "nocookie") {
+                    sendIframeCommand(timeline?.playing ? "pauseVideo" : "playVideo");
+                  }
+                }}
                 title={
                   canControlPlayback
                     ? timeline?.playing

@@ -34,6 +34,7 @@ export interface VoiceTransport {
   getStats(): PeerLatencyStats[];
   getPeerStats(userId: string): PeerLatencyStats | null;
   measurePeerLatencyAsync(userId: string): Promise<PeerLatencyStats | null>;
+  requestStream(targetUserId: string): void;
   setVocalVolume(volume: number): void;
   destroy(): void;
 }
@@ -171,8 +172,24 @@ export class P2PVoiceTransport implements VoiceTransport {
     }
   }
 
+  public requestStream(targetUserId: string) {
+    if (this.socket && targetUserId !== this.localUserId) {
+      this.socket.emit(SOCKET_EVENTS.RTC_SIGNAL, {
+        targetUserId,
+        signal: {
+          type: "request-stream",
+        },
+      });
+    }
+  }
+
   public async handleSignal(fromUserId: string, signal: RtcSignalPayload["signal"]): Promise<void> {
-    if (signal.type === "offer") {
+    if (signal.type === "request-stream") {
+      // Khi có người nghe yêu cầu luồng (vừa vào phòng hoặc vừa bật user gesture)
+      if (this.isSinger && this.localStream) {
+        await this.createSenderPeer(fromUserId);
+      }
+    } else if (signal.type === "offer") {
       await this.handleIncomingOffer(fromUserId, signal.sdp);
     } else if (signal.type === "answer") {
       const pc = this.peerConnections.get(fromUserId);
@@ -298,6 +315,10 @@ export class P2PVoiceTransport implements VoiceTransport {
     hiddenAudio.play().catch(() => {});
 
     if (!this.audioCtx) return;
+
+    if (this.audioCtx.state === "suspended") {
+      this.audioCtx.resume().catch(() => {});
+    }
 
     const sourceNode = this.audioCtx.createMediaStreamSource(stream);
     const delayNode = this.audioCtx.createDelay(2.0); // Tối đa trễ 2 giây

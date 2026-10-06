@@ -38,6 +38,8 @@ export class RoomManager {
   private disconnectTimers: Map<string, NodeJS.Timeout> = new Map();
   private emptyRoomTimers: Map<string, NodeJS.Timeout> = new Map();
   private countdownTimers: Map<string, NodeJS.Timeout> = new Map();
+  private songAutoEndTimers: Map<string, NodeJS.Timeout> = new Map();
+  private scoringTimers: Map<string, NodeJS.Timeout> = new Map();
   private snapshotTimer: NodeJS.Timeout | null = null;
   private onStateChanged?: (roomCode: string, state: RoomState) => void;
 
@@ -205,6 +207,8 @@ export class RoomManager {
     if (!room) return { error: "Phòng không tồn tại." };
     const res = pureSkipSong(room, userId, reason);
     if (res.error) return { error: res.error };
+    this.clearSongAutoEnd(code);
+    this.clearScoringTimer(code);
     this.rooms.set(code.toUpperCase(), res.state);
     this.checkAndScheduleCountdown(code, res.state);
     this.emitChange(code);
@@ -215,32 +219,39 @@ export class RoomManager {
     code: string,
     voiceActivityRatio: number = 0.5
   ): { state?: RoomState; scoringStarted: boolean } {
-    const room = this.getRoom(code);
+    const upperCode = code.toUpperCase();
+    this.clearSongAutoEnd(upperCode);
+    const room = this.getRoom(upperCode);
     if (!room) return { scoringStarted: false };
     const { state: nextState, scoringStarted } = advanceSongOnEnded(
       room,
       voiceActivityRatio
     );
-    this.rooms.set(code.toUpperCase(), nextState);
-    this.emitChange(code);
+    this.rooms.set(upperCode, nextState);
+    this.emitChange(upperCode);
 
     // Nếu bắt đầu chấm điểm, tự động chuyển bài sau SCORE_ANNOUNCE_DURATION_SEC (10s)
     if (scoringStarted) {
-      setTimeout(() => {
-        this.finishScoring(code);
+      this.clearScoringTimer(upperCode);
+      const timer = setTimeout(() => {
+        this.clearScoringTimer(upperCode);
+        this.finishScoring(upperCode);
       }, CONFIG.SCORE_ANNOUNCE_DURATION_SEC * 1000);
+      this.scoringTimers.set(upperCode, timer);
     }
 
     return { state: nextState, scoringStarted };
   }
 
   public finishScoring(code: string) {
-    const room = this.getRoom(code);
+    const upperCode = code.toUpperCase();
+    this.clearScoringTimer(upperCode);
+    const room = this.getRoom(upperCode);
     if (!room || !room.scoring) return;
     const nextState = pureFinishScoring(room);
-    this.rooms.set(code.toUpperCase(), nextState);
-    this.checkAndScheduleCountdown(code, nextState);
-    this.emitChange(code);
+    this.rooms.set(upperCode, nextState);
+    this.checkAndScheduleCountdown(upperCode, nextState);
+    this.emitChange(upperCode);
   }
 
   public takeSlot(
@@ -329,6 +340,7 @@ export class RoomManager {
     const res = purePausePlayback(room, userId);
     if (res.error) return { error: res.error };
     this.clearCountdownTimer(code);
+    this.clearSongAutoEnd(code);
     this.rooms.set(code.toUpperCase(), res.state);
     this.emitChange(code);
     return { state: res.state };
@@ -376,7 +388,44 @@ export class RoomManager {
 
     const nextState = pureFinishCountdown(room);
     this.rooms.set(upperCode, nextState);
+    this.scheduleSongAutoEnd(upperCode, nextState);
     this.emitChange(upperCode);
+  }
+
+  public scheduleSongAutoEnd(code: string, state: RoomState) {
+    const upperCode = code.toUpperCase();
+    this.clearSongAutoEnd(upperCode);
+
+    if (state.currentSong && state.timeline.playing && !state.timeline.countdown?.active) {
+      const durationSec = state.currentSong.durationSec || 180;
+      const elapsedSec = Math.max(0, (Date.now() - state.timeline.serverTimeMs) / 1000);
+      const remainingMs = Math.max(1000, Math.round((durationSec - elapsedSec + 2) * 1000));
+
+      const timer = setTimeout(() => {
+        this.clearSongAutoEnd(upperCode);
+        this.advanceSong(upperCode);
+      }, remainingMs);
+
+      this.songAutoEndTimers.set(upperCode, timer);
+    }
+  }
+
+  public clearSongAutoEnd(code: string) {
+    const upperCode = code.toUpperCase();
+    const timer = this.songAutoEndTimers.get(upperCode);
+    if (timer) {
+      clearTimeout(timer);
+      this.songAutoEndTimers.delete(upperCode);
+    }
+  }
+
+  public clearScoringTimer(code: string) {
+    const upperCode = code.toUpperCase();
+    const timer = this.scoringTimers.get(upperCode);
+    if (timer) {
+      clearTimeout(timer);
+      this.scoringTimers.delete(upperCode);
+    }
   }
 
   private checkEmptyRoom(code: string) {
@@ -388,6 +437,8 @@ export class RoomManager {
       // Hẹn giờ xoá phòng sau 10 phút trống
       const timer = setTimeout(() => {
         this.clearCountdownTimer(code);
+        this.clearSongAutoEnd(code);
+        this.clearScoringTimer(code);
         this.rooms.delete(code.toUpperCase());
         this.emptyRoomTimers.delete(code.toUpperCase());
       }, CONFIG.ROOM_EMPTY_TIMEOUT_MS);

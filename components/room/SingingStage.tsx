@@ -5,7 +5,7 @@
  */
 
 import React from "react";
-import { Mic, MicOff, Sliders, Headphones, UserMinus, Plus, Volume2 } from "lucide-react";
+import { Mic, MicOff, Sliders, Headphones, UserMinus, Plus, Volume2, Music } from "lucide-react";
 import { Avatar } from "../ui/Avatar";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
@@ -18,6 +18,8 @@ interface SingingStageProps {
   isMicActive: boolean;
   isMonitorActive: boolean;
   localVolumeLevel: number;
+  musicVolume?: number;
+  onUpdateMusicVolume?: (vol: number) => void;
   vocalVolume?: number;
   onUpdateVocalVolume?: (vol: number) => void;
   onTakeSlot: (slotIndex: number) => void;
@@ -34,6 +36,8 @@ export const SingingStage: React.FC<SingingStageProps> = ({
   isMicActive,
   isMonitorActive,
   localVolumeLevel,
+  musicVolume,
+  onUpdateMusicVolume,
   vocalVolume,
   onUpdateVocalVolume,
   onTakeSlot,
@@ -66,6 +70,29 @@ export const SingingStage: React.FC<SingingStageProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Chỉnh nhanh âm lượng nhạc nền */}
+          {onUpdateMusicVolume && musicVolume !== undefined && (
+            <div
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-[8px] bg-[var(--surface-raised)] border border-[var(--border)] text-[12px]"
+              title={`Âm lượng nhạc nền: ${Math.round(musicVolume * 100)}%`}
+            >
+              <Music className="w-3.5 h-3.5 text-[var(--accent)] shrink-0" />
+              <span className="text-[11px] text-[var(--text-muted)] font-medium">Nhạc:</span>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.02"
+                value={musicVolume}
+                onChange={(e) => onUpdateMusicVolume(parseFloat(e.target.value))}
+                className="w-14 sm:w-16 h-1 accent-[var(--accent)] bg-white/20 rounded cursor-pointer"
+              />
+              <span className="text-[11px] font-mono-tabular text-[var(--text)] w-7 text-right">
+                {Math.round(musicVolume * 100)}%
+              </span>
+            </div>
+          )}
+
           {/* Chỉnh nhanh âm lượng giọng hát phòng */}
           {onUpdateVocalVolume && vocalVolume !== undefined && (
             <div
@@ -81,7 +108,7 @@ export const SingingStage: React.FC<SingingStageProps> = ({
                 step="0.05"
                 value={vocalVolume}
                 onChange={(e) => onUpdateVocalVolume(parseFloat(e.target.value))}
-                className="w-16 h-1 accent-[var(--accent)] bg-white/20 rounded cursor-pointer"
+                className="w-14 sm:w-16 h-1 accent-[var(--accent)] bg-white/20 rounded cursor-pointer"
               />
               <span className="text-[11px] font-mono-tabular text-[var(--text)] w-7 text-right">
                 {Math.round(vocalVolume * 100)}%
