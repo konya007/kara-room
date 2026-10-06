@@ -114,20 +114,9 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      // Cuối cùng thử tìm audio nếu không có video
-      if (!format) {
-        try {
-          format =
-            info?.chooseFormat({ type: "audio", quality: "best" }) ||
-            info?.chooseFormat({ type: "audio" });
-        } catch {
-          format = null;
-        }
-      }
-
-      // Nếu vẫn không có dữ liệu stream (video nhạc bản quyền / VEVO / DRM)
-      if (!format) {
-        console.warn(`[YouTubeStreamAPI] Video ${videoId} không có định dạng phát trực tiếp khả dụng. Đề xuất phát qua NoCookie.`);
+      // Chỉ chấp nhận format có cả hình ảnh và âm thanh (muxed video+audio) cho thẻ <video>
+      if (!format || !format.has_video) {
+        console.warn(`[YouTubeStreamAPI] Video ${videoId} không có định dạng video+audio khả dụng. Tự động đề xuất phát qua NoCookie.`);
         return new NextResponse("streaming_not_available", { status: 422 });
       }
 

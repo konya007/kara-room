@@ -181,13 +181,10 @@ export default function KaraRoomPage() {
     }
   }, [store.roomState?.singerSlots, store.hasUserGesture, onlineUsersKey]);
 
-  // 4b. Khán giả chủ động gửi "request-stream" tới các ca sĩ đang trên slot ngay khi vào phòng
+  // 4b. Thành viên trong phòng (gồm cả khán giả và ca sĩ hát cùng) chủ động gửi "request-stream" tới các ca sĩ khác
   const singerSlotsKey = store.roomState?.singerSlots.map((s) => s.userId || "").join(",") || "";
   useEffect(() => {
     if (!store.roomState || !store.hasUserGesture) return;
-
-    const mySlot = store.roomState.singerSlots.find((s) => s.userId === store.userId);
-    if (mySlot) return; // Nếu mình là ca sĩ thì không request stream
 
     const activeSingers = store.roomState.singerSlots
       .map((s) => s.userId)
@@ -368,7 +365,11 @@ export default function KaraRoomPage() {
               }
             }}
             onPlaybackError={(reason) => socket.emit(SOCKET_EVENTS.SONG_SKIP, { reason })}
-            onDriftUpdated={setPlayerDriftMs}
+            onDriftUpdated={(driftMs) => {
+              if (store.debugMode) {
+                setPlayerDriftMs(driftMs);
+              }
+            }}
           />
 
           <SingingStage

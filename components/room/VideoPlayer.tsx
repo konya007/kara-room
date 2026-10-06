@@ -93,6 +93,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setPrevVideoId(timeline?.videoId);
     setPlayerEngine("native");
     setErrorMessage(null);
+    setIsLoadingMedia(Boolean(timeline?.videoId));
     hasEndedRef.current = false;
   }
 
@@ -160,7 +161,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         }
       } else {
         if (forcePlay || video.paused) {
-          video.play().catch(() => {});
+          video
+            .play()
+            .then(() => setIsLoadingMedia(false))
+            .catch(() => {});
         }
       }
     },
@@ -174,11 +178,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         videoRef.current.pause();
         videoRef.current.src = "";
       }
+      setIsLoadingMedia(false);
       return;
     }
 
     if (playerEngine === "native" && videoRef.current) {
-      setIsLoadingMedia(true);
+      if (videoRef.current.readyState < 2) {
+        setIsLoadingMedia(true);
+      }
       syncVideoState();
     }
   }, [
@@ -239,6 +246,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   const handleTimeUpdate = () => {
     if (videoRef.current) {
+      if (isLoadingMedia) {
+        setIsLoadingMedia(false);
+      }
       setCurrentTimeSec(videoRef.current.currentTime);
       if (videoRef.current.duration && !isNaN(videoRef.current.duration)) {
         setMediaDurationSec(videoRef.current.duration);
@@ -251,6 +261,24 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     hasEndedRef.current = true;
     onSongEnded();
   }, [onSongEnded]);
+
+  // Stall Watchdog: Nếu video bị đệm/treo quá 3.5s trong khi timeline đang phát,
+  // tự động chuyển mượt mà sang YouTube NoCookie để đảm bảo nhạc và hình ảnh đồng nhất
+  useEffect(() => {
+    if (playerEngine !== "native" || !timeline?.videoId || !timeline.playing || timeline.countdown?.active) {
+      return;
+    }
+
+    if (!isLoadingMedia) return;
+
+    const timeout = setTimeout(() => {
+      console.warn("[VideoPlayer] Luồng media tự quản bị đệm/treo quá lâu (>3.5s). Tự động chuyển sang YouTube NoCookie.");
+      setIsLoadingMedia(false);
+      setPlayerEngine("nocookie");
+    }, 3500);
+
+    return () => clearTimeout(timeout);
+  }, [isLoadingMedia, playerEngine, timeline?.videoId, timeline?.playing, timeline?.countdown?.active]);
 
   // Theo dõi tiến trình thời gian và tự động kết thúc bài khi chạm mốc durationSec
   useEffect(() => {
@@ -335,8 +363,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           autoPlay
           onLoadedMetadata={handleMediaLoaded}
           onCanPlay={handleMediaLoaded}
+          onCanPlayThrough={() => setIsLoadingMedia(false)}
           onLoadedData={handleMediaLoaded}
-          onWaiting={() => setIsLoadingMedia(true)}
+          onSeeked={() => setIsLoadingMedia(false)}
+          onWaiting={() => {
+            if (videoRef.current && videoRef.current.readyState < 3) {
+              setIsLoadingMedia(true);
+            }
+          }}
           onPlaying={() => {
             setIsLoadingMedia(false);
             setIsPlaying(true);
@@ -358,6 +392,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           title="KaraRoom Video Player"
           allow="autoplay; encrypted-media"
           onLoad={() => {
+            setIsLoadingMedia(false);
             if (isMuted) {
               sendIframeCommand("mute");
             } else {
@@ -435,6 +470,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               type="button"
               onClick={() => {
                 const nextEngine = playerEngine === "native" ? "nocookie" : "native";
+                setIsLoadingMedia(false);
                 setPlayerEngine(nextEngine);
               }}
               title="Nhấn để đổi giữa Trình phát tự quản HTML5 và NoCookie"

@@ -54,7 +54,7 @@ export function getIceServers(): RTCIceServer[] {
   ];
 }
 
-/** Tinh chỉnh SDP Opus: bitrate 96kbps, bật FEC (sửa lỗi), tắt DTX (tránh ngắt tiếng hát) */
+/** Tinh chỉnh SDP Opus: bitrate 96kbps, packet size 10ms (minptime=10;ptime=10), mono 48kHz, bật FEC (sửa lỗi), tắt DTX, CBR */
 export function mungeOpusSdp(sdp: string, bitrate: number = CONFIG.OPUS_BITRATE): string {
   const lines = sdp.split("\r\n");
   let opusPayloadType: string | null = null;
@@ -71,7 +71,7 @@ export function mungeOpusSdp(sdp: string, bitrate: number = CONFIG.OPUS_BITRATE)
 
   const modifiedLines = lines.map((line) => {
     if (line.startsWith(`a=fmtp:${opusPayloadType}`)) {
-      return `${line};maxaveragebitrate=${bitrate};stereo=1;useinbandfec=1;usedtx=0;cbr=1`;
+      return `${line};maxaveragebitrate=${bitrate};stereo=0;sprop-stereo=0;useinbandfec=1;usedtx=0;cbr=1;maxplaybackrate=48000;sprop-maxcapturerate=48000;minptime=10;ptime=10`;
     }
     return line;
   });
@@ -210,7 +210,11 @@ export class P2PVoiceTransport implements VoiceTransport {
       this.peerConnections.get(targetUserId)?.close();
     }
 
-    const pc = new RTCPeerConnection({ iceServers: getIceServers() });
+    const pc = new RTCPeerConnection({
+      iceServers: getIceServers(),
+      bundlePolicy: "max-bundle",
+      rtcpMuxPolicy: "require",
+    });
     this.peerConnections.set(targetUserId, pc);
 
     // Gắn luồng mic local vào PeerConnection
@@ -259,7 +263,11 @@ export class P2PVoiceTransport implements VoiceTransport {
       pc.close();
     }
 
-    pc = new RTCPeerConnection({ iceServers: getIceServers() });
+    pc = new RTCPeerConnection({
+      iceServers: getIceServers(),
+      bundlePolicy: "max-bundle",
+      rtcpMuxPolicy: "require",
+    });
     this.peerConnections.set(fromUserId, pc);
 
     pc.onicecandidate = (event) => {
@@ -276,6 +284,15 @@ export class P2PVoiceTransport implements VoiceTransport {
 
     // Khi nhận được audio track từ ca sĩ
     pc.ontrack = (event) => {
+      // Triệt tiêu bộ đệm Jitter Buffer của trình duyệt xuống mức tối thiểu (0-10ms)
+      if (event.receiver) {
+        if ("playoutDelayHint" in event.receiver) {
+          event.receiver.playoutDelayHint = 0;
+        }
+        if ("jitterBufferTarget" in event.receiver) {
+          (event.receiver as any).jitterBufferTarget = 0;
+        }
+      }
       const remoteStream = event.streams[0] || new MediaStream([event.track]);
       this.setupRemoteAudioPipeline(fromUserId, remoteStream);
       if (this.events) {
@@ -302,7 +319,8 @@ export class P2PVoiceTransport implements VoiceTransport {
   /**
    * Thiết lập Audio Pipeline phía người nghe:
    * Chrome yêu cầu thẻ <audio muted> để WebRTC stream được kích hoạt,
-   * sau đó đưa vào Web Audio DelayNode để bù đúng khoảng trễ 400ms.
+   * sau đó đưa vào Web Audio DelayNode để bù đúng khoảng trễ 400ms (cho khán giả),
+   * hoặc 0ms tức thời (cho ca sĩ hát cùng nhau).
    */
   private setupRemoteAudioPipeline(userId: string, stream: MediaStream) {
     this.cleanupRemotePipeline(userId);
@@ -322,7 +340,9 @@ export class P2PVoiceTransport implements VoiceTransport {
 
     const sourceNode = this.audioCtx.createMediaStreamSource(stream);
     const delayNode = this.audioCtx.createDelay(2.0); // Tối đa trễ 2 giây
-    delayNode.delayTime.value = this.audienceDelayMs / 1000;
+    // Nếu người nghe đang là Ca sĩ: KHÔNG BÙ TRỄ (0ms), nghe bạn diễn real-time lập tức!
+    const initialDelaySec = this.isSinger ? 0 : this.audienceDelayMs / 1000;
+    delayNode.delayTime.value = initialDelaySec;
 
     const gainNode = this.audioCtx.createGain();
     gainNode.gain.value = this.vocalVolume;
@@ -391,8 +411,12 @@ export class P2PVoiceTransport implements VoiceTransport {
 
         // Ước lượng độ trễ luồng = RTT / 2 + Jitter Buffer + Thu/Mã hoá (40ms)
         const estimatedLatencyMs = Math.round(rttMs / 2 + jitterMs + CONFIG.ESTIMATED_CAPTURE_ENCODE_LATENCY_MS);
-        // Phần còn thiếu cần bù bằng DelayNode để tổng độ trễ bằng audienceDelayMs
-        const compensationDelayMs = Math.max(0, this.audienceDelayMs - estimatedLatencyMs);
+        // Phần còn thiếu cần bù bằng DelayNode:
+        // - Nếu là Ca sĩ: KHÔNG BÙ TRỄ (0ms) để hai ca sĩ nghe nhau P2P trực tiếp theo thời gian thực!
+        // - Nếu là Khán giả: Bù trễ để giọng ca sĩ khớp hoàn hảo với video YouTube.
+        const compensationDelayMs = this.isSinger
+          ? 0
+          : Math.max(0, this.audienceDelayMs - estimatedLatencyMs);
 
         if (pipeline && this.audioCtx) {
           pipeline.lastRttMs = rttMs;
@@ -432,7 +456,7 @@ export class P2PVoiceTransport implements VoiceTransport {
         rttMs: pipeline.lastRttMs,
         jitterBufferMs: pipeline.lastJitterMs,
         estimatedLatencyMs: est,
-        compensationDelayMs: Math.max(0, this.audienceDelayMs - est),
+        compensationDelayMs: this.isSinger ? 0 : Math.max(0, this.audienceDelayMs - est),
         iceState: pipeline.iceState,
       });
     }

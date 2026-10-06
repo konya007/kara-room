@@ -56,7 +56,7 @@ export class VoiceProcessingChain {
     const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     this.ctx = new AudioContextClass({ latencyHint: "interactive" });
 
-    // Yêu cầu luồng âm thanh nguyên bản không bị filter méo tiếng
+    // Yêu cầu luồng âm thanh nguyên bản không bị filter méo tiếng và tối ưu độ trễ phần cứng
     const constraints: MediaStreamConstraints = {
       audio: {
         deviceId: deviceId ? { exact: deviceId } : undefined,
@@ -64,6 +64,8 @@ export class VoiceProcessingChain {
         noiseSuppression: false,
         autoGainControl: false,
         channelCount: 1,
+        sampleRate: 48000,
+        ...({ latency: 0 } as Record<string, unknown>),
       },
       video: false,
     };

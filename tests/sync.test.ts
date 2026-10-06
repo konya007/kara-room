@@ -106,3 +106,23 @@ describe("Drift Correction Decision Logic", () => {
     expect(rate).toBe(1.25);
   });
 });
+
+import { mungeOpusSdp } from "../lib/rtc/transport";
+
+describe("WebRTC Opus Low-Latency SDP Munging", () => {
+  it("tinh chỉnh thông số Opus thành ptime=10, minptime=10, mono 48kHz, CBR", () => {
+    const mockSdp = [
+      "v=0",
+      "m=audio 9 UDP/TLS/RTP/SAVPF 111",
+      "a=rtpmap:111 opus/48000/2",
+      "a=fmtp:111 minptime=10;useinbandfec=1",
+    ].join("\r\n");
+
+    const munged = mungeOpusSdp(mockSdp, 96000);
+    expect(munged).toContain("minptime=10;ptime=10");
+    expect(munged).toContain("stereo=0");
+    expect(munged).toContain("maxplaybackrate=48000");
+    expect(munged).toContain("cbr=1");
+    expect(munged).toContain("maxaveragebitrate=96000");
+  });
+});
