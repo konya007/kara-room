@@ -36,6 +36,7 @@ export interface VoiceTransport {
   measurePeerLatencyAsync(userId: string): Promise<PeerLatencyStats | null>;
   requestStream(targetUserId: string): void;
   setVocalVolume(volume: number): void;
+  setIsSinger(isSinger: boolean): void;
   destroy(): void;
 }
 
@@ -141,6 +142,25 @@ export class P2PVoiceTransport implements VoiceTransport {
 
   public updateAudienceDelay(delayMs: number) {
     this.audienceDelayMs = delayMs;
+    if (!this.isSinger && this.audioCtx) {
+      for (const pipeline of this.remotePipelines.values()) {
+        if (pipeline.delayNode) {
+          pipeline.delayNode.delayTime.setTargetAtTime(delayMs / 1000, this.audioCtx.currentTime, 0.08);
+        }
+      }
+    }
+  }
+
+  public setIsSinger(isSinger: boolean) {
+    this.isSinger = isSinger;
+    if (this.audioCtx) {
+      for (const pipeline of this.remotePipelines.values()) {
+        if (pipeline.delayNode) {
+          const delaySec = isSinger ? 0 : this.audienceDelayMs / 1000;
+          pipeline.delayNode.delayTime.setTargetAtTime(delaySec, this.audioCtx.currentTime, 0.05);
+        }
+      }
+    }
   }
 
   public setVocalVolume(volume: number) {
@@ -340,8 +360,8 @@ export class P2PVoiceTransport implements VoiceTransport {
 
     const sourceNode = this.audioCtx.createMediaStreamSource(stream);
     const delayNode = this.audioCtx.createDelay(2.0); // Tối đa trễ 2 giây
-    // Nếu người nghe đang là Ca sĩ: KHÔNG BÙ TRỄ (0ms), nghe bạn diễn real-time lập tức!
-    const initialDelaySec = this.isSinger ? 0 : this.audienceDelayMs / 1000;
+    // Bỏ toàn bộ độ trễ: Phát tức thì (0ms) khi là ca sĩ hoặc audienceDelayMs <= 0
+    const initialDelaySec = (this.isSinger || this.audienceDelayMs <= 0) ? 0 : this.audienceDelayMs / 1000;
     delayNode.delayTime.value = initialDelaySec;
 
     const gainNode = this.audioCtx.createGain();
@@ -412,9 +432,8 @@ export class P2PVoiceTransport implements VoiceTransport {
         // Ước lượng độ trễ luồng = RTT / 2 + Jitter Buffer + Thu/Mã hoá (40ms)
         const estimatedLatencyMs = Math.round(rttMs / 2 + jitterMs + CONFIG.ESTIMATED_CAPTURE_ENCODE_LATENCY_MS);
         // Phần còn thiếu cần bù bằng DelayNode:
-        // - Nếu là Ca sĩ: KHÔNG BÙ TRỄ (0ms) để hai ca sĩ nghe nhau P2P trực tiếp theo thời gian thực!
-        // - Nếu là Khán giả: Bù trễ để giọng ca sĩ khớp hoàn hảo với video YouTube.
-        const compensationDelayMs = this.isSinger
+        // - Bỏ toàn bộ độ trễ nhân tạo: 0ms cho cả ca sĩ và khán giả khi audienceDelayMs = 0
+        const compensationDelayMs = (this.isSinger || this.audienceDelayMs <= 0)
           ? 0
           : Math.max(0, this.audienceDelayMs - estimatedLatencyMs);
 
@@ -456,7 +475,7 @@ export class P2PVoiceTransport implements VoiceTransport {
         rttMs: pipeline.lastRttMs,
         jitterBufferMs: pipeline.lastJitterMs,
         estimatedLatencyMs: est,
-        compensationDelayMs: this.isSinger ? 0 : Math.max(0, this.audienceDelayMs - est),
+        compensationDelayMs: (this.isSinger || this.audienceDelayMs <= 0) ? 0 : Math.max(0, this.audienceDelayMs - est),
         iceState: pipeline.iceState,
       });
     }
@@ -473,7 +492,7 @@ export class P2PVoiceTransport implements VoiceTransport {
       rttMs: pipeline.lastRttMs,
       jitterBufferMs: pipeline.lastJitterMs,
       estimatedLatencyMs: est,
-      compensationDelayMs: Math.max(0, this.audienceDelayMs - est),
+      compensationDelayMs: (this.isSinger || this.audienceDelayMs <= 0) ? 0 : Math.max(0, this.audienceDelayMs - est),
       iceState: pc ? pc.iceConnectionState : pipeline.iceState,
     };
   }
@@ -508,7 +527,7 @@ export class P2PVoiceTransport implements VoiceTransport {
       rttMs,
       jitterBufferMs: jitterMs,
       estimatedLatencyMs: est,
-      compensationDelayMs: Math.max(0, this.audienceDelayMs - est),
+      compensationDelayMs: (this.isSinger || this.audienceDelayMs <= 0) ? 0 : Math.max(0, this.audienceDelayMs - est),
       iceState: pc.iceConnectionState,
     };
   }

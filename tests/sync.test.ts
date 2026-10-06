@@ -49,7 +49,19 @@ describe("Timeline & Target Position Math", () => {
     expect(target).toBe(15);
   });
 
-  it("khán giả (Audience) phát nhạc trễ đúng AUDIENCE_DELAY_MS (mặc định 400ms)", () => {
+  it("khán giả (Audience) phát nhạc cùng thời gian thực với ca sĩ khi AUDIENCE_DELAY_MS = 0 (bỏ toàn bộ độ trễ)", () => {
+    // 5 giây sau (serverNowMs = 15000), 0 delay
+    const target = calculateTargetPositionSec({
+      timeline: mockTimeline,
+      serverNowMs: 15000,
+      isSinger: false,
+      audienceDelayMs: 0,
+    });
+    // 10s + 5s = 15.0s (đồng bộ hoàn toàn với ca sĩ)
+    expect(target).toBeCloseTo(15.0, 2);
+  });
+
+  it("khán giả (Audience) phát nhạc trễ đúng audienceDelayMs nếu được chỉ định", () => {
     // 5 giây sau (serverNowMs = 15000), trễ 400ms = 0.4s
     const target = calculateTargetPositionSec({
       timeline: mockTimeline,
@@ -108,6 +120,7 @@ describe("Drift Correction Decision Logic", () => {
 });
 
 import { mungeOpusSdp } from "../lib/rtc/transport";
+import { VOICE_PRESETS } from "../lib/audio/presets";
 
 describe("WebRTC Opus Low-Latency SDP Munging", () => {
   it("tinh chỉnh thông số Opus thành ptime=10, minptime=10, mono 48kHz, CBR", () => {
@@ -126,3 +139,26 @@ describe("WebRTC Opus Low-Latency SDP Munging", () => {
     expect(munged).toContain("maxaveragebitrate=96000");
   });
 });
+
+describe("Voice Presets & Audio Enhancement", () => {
+  it("preset zeroDelay có độ trễ echo cực thấp (<=60ms), bật chống ồn và tăng cường giọng", () => {
+    const zero = VOICE_PRESETS.zeroDelay.settings;
+    expect(zero.echoDelaySec).toBeLessThanOrEqual(0.06);
+    expect(zero.noiseSuppression).toBe(true);
+    expect(zero.echoCancellation).toBe(true);
+    expect(zero.voiceEnhance).toBe(true);
+    expect(zero.noiseGateEnabled).toBe(true);
+  });
+
+  it("tất cả preset ca hát có đầy đủ trường cấu hình chống ồn và tăng cường giọng", () => {
+    for (const [key, preset] of Object.entries(VOICE_PRESETS)) {
+      expect(preset.name).toBeDefined();
+      expect(typeof preset.settings.noiseSuppression).toBe("boolean");
+      expect(typeof preset.settings.echoCancellation).toBe("boolean");
+      expect(typeof preset.settings.voiceEnhance).toBe("boolean");
+      expect(typeof preset.settings.noiseGateEnabled).toBe("boolean");
+      expect(preset.settings.echoDelaySec).toBeGreaterThan(0);
+    }
+  });
+});
+

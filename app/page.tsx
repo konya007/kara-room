@@ -51,7 +51,7 @@ export default function KaraRoomPage() {
   const [playerDriftMs, setPlayerDriftMs] = useState(0);
   const [peerStats, setPeerStats] = useState<PeerLatencyStats[]>([]);
   const [voiceSettings, setVoiceSettings] = useState<VoiceSettings>({
-    ...VOICE_PRESETS.karaoke.settings,
+    ...VOICE_PRESETS.zeroDelay.settings,
     monitorEnabled: false,
   });
 
@@ -138,6 +138,7 @@ export default function KaraRoomPage() {
 
     const mySlot = store.roomState.singerSlots.find((s) => s.userId === store.userId);
     const isSinging = Boolean(mySlot);
+    voiceTransportRef.current.setIsSinger(isSinging);
     const allOnlineIds = Object.values(store.roomState.users)
       .filter((u) => u.isOnline)
       .map((u) => u.id);
@@ -200,56 +201,12 @@ export default function KaraRoomPage() {
     voiceTransportRef.current.setVocalVolume(store.vocalVolume);
   }, [store.vocalVolume]);
 
-  // 5. Tự động tính toán & tối ưu độ trễ (Voice Delay) khi đổi ca sĩ
+  // 5. Bỏ toàn bộ độ trễ nhân tạo: Khán giả và ca sĩ nghe nhạc và giọng hát tức thì (0ms)
   useEffect(() => {
     if (!store.roomState || !store.hasUserGesture) return;
-
-    const mySlot = store.roomState.singerSlots.find((s) => s.userId === store.userId);
-    const isSinging = Boolean(mySlot);
-
-    // Chỉ áp dụng cho người nghe (Khán giả)
-    if (isSinging) {
-      prevSingerKeyRef.current = "";
-      return;
-    }
-
-    const currentSingers = store.roomState.singerSlots
-      .map((s) => (s.userId ? store.roomState?.users[s.userId] : null))
-      .filter((u): u is NonNullable<typeof u> => Boolean(u && u.isOnline && u.id !== store.userId));
-
-    const singerKey = currentSingers.map((s) => s.id).sort().join(",");
-
-    // Khi danh sách ca sĩ thay đổi và có ít nhất 1 ca sĩ đang hát
-    if (singerKey && singerKey !== prevSingerKeyRef.current) {
-      prevSingerKeyRef.current = singerKey;
-      const targetSinger = currentSingers[0];
-
-      // Đợi 1200ms để WebRTC peer connection kết nối ổn định rồi đo latency
-      const timer = setTimeout(async () => {
-        try {
-          const stats = await voiceTransportRef.current.measurePeerLatencyAsync(targetSinger.id);
-          let optimalDelay: number = CONFIG.AUDIENCE_DELAY_MS;
-          if (stats && stats.rttMs > 0) {
-            // Độ trễ giọng = RTT/2 + Jitter + 40ms; Bù thêm 40ms safety margin
-            optimalDelay = Math.max(150, Math.min(1000, Math.round(stats.estimatedLatencyMs + 40)));
-          }
-          store.setAudienceDelayMs(optimalDelay);
-          voiceTransportRef.current.updateAudienceDelay(optimalDelay);
-          setToastMessage({
-            text: `🎧 Đã tự động căn độ trễ ${optimalDelay}ms theo ca sĩ ${targetSinger.nickname} để khớp nhịp!`,
-            type: "success",
-          });
-        } catch {}
-      }, 1200);
-
-      return () => clearTimeout(timer);
-    } else if (!singerKey && prevSingerKeyRef.current) {
-      // Khi không còn ca sĩ nào trên slot
-      prevSingerKeyRef.current = "";
-      store.setAudienceDelayMs(CONFIG.AUDIENCE_DELAY_MS);
-      voiceTransportRef.current.updateAudienceDelay(CONFIG.AUDIENCE_DELAY_MS);
-    }
-  }, [store.roomState?.singerSlots, store.hasUserGesture]);
+    store.setAudienceDelayMs(0);
+    voiceTransportRef.current.updateAudienceDelay(0);
+  }, [store.roomState?.code, store.hasUserGesture]);
 
   // === CÁC TÁC VỤ PHÒNG ===
   const handleCreateRoom = () => {

@@ -5,8 +5,8 @@
 
 export const CONFIG = {
   // === ĐỒNG BỘ ÂM THANH & VIDEO ===
-  /** Độ trễ mặc định của khán giả so với timeline gốc của phòng (mili-giây) */
-  AUDIENCE_DELAY_MS: 400,
+  /** Độ trễ mặc định của khán giả so với timeline gốc của phòng (mili-giây) - Đã bỏ toàn bộ độ trễ nhân tạo về 0ms */
+  AUDIENCE_DELAY_MS: 0,
 
   /** Ngưỡng trôi tối thiểu bỏ qua không cần chỉnh (mili-giây) */
   DRIFT_TOLERANCE_MS: 40,

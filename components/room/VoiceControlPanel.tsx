@@ -1,11 +1,20 @@
 /**
  * KaraRoom - Bảng điều khiển hiệu ứng giọng hát và đồng bộ (VoiceControlPanel).
- * Chọn mic, đo mức âm, các preset (Phòng thu, Karaoke, Sân khấu), EQ, Echo, Reverb,
- * Toggle Monitor tai nghe có dây, và 2 thanh âm lượng riêng (Nhạc & Giọng).
+ * Chọn mic, đo mức âm, các preset (Siêu tốc 0 trễ, Phòng thu, Karaoke, Sân khấu),
+ * Cơ chế Chống ồn AI & Cổng cắt ồn Noise Gate, Tăng cường giọng hát Vocal Enhancer,
+ * Chống hú Echo Cancellation, Tinh chỉnh Echo Delay, và 2 thanh âm lượng riêng.
  */
 
 import React, { useEffect, useState } from "react";
-import { Mic, Headphones, Volume2, AlertTriangle, Sparkles } from "lucide-react";
+import {
+  Mic,
+  Volume2,
+  AlertTriangle,
+  Sparkles,
+  ShieldCheck,
+  Zap,
+  Sliders,
+} from "lucide-react";
 import { Drawer } from "../ui/Drawer";
 import { Slider } from "../ui/Slider";
 import { Toggle } from "../ui/Toggle";
@@ -43,17 +52,20 @@ export const VoiceControlPanel: React.FC<VoiceControlPanelProps> = ({
 }) => {
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState("");
-  const [activePreset, setActivePreset] = useState<PresetKey | "custom">("karaoke");
+  const [activePreset, setActivePreset] = useState<PresetKey | "custom">("zeroDelay");
 
   useEffect(() => {
     if (typeof navigator !== "undefined" && navigator.mediaDevices?.enumerateDevices) {
-      navigator.mediaDevices.enumerateDevices().then((devs) => {
-        const audioInputs = devs.filter((d) => d.kind === "audioinput");
-        setDevices(audioInputs);
-        if (audioInputs[0] && !selectedDeviceId) {
-          setSelectedDeviceId(audioInputs[0].deviceId);
-        }
-      }).catch(() => {});
+      navigator.mediaDevices
+        .enumerateDevices()
+        .then((devs) => {
+          const audioInputs = devs.filter((d) => d.kind === "audioinput");
+          setDevices(audioInputs);
+          if (audioInputs[0] && !selectedDeviceId) {
+            setSelectedDeviceId(audioInputs[0].deviceId);
+          }
+        })
+        .catch(() => {});
     }
   }, [isOpen]);
 
@@ -65,7 +77,18 @@ export const VoiceControlPanel: React.FC<VoiceControlPanelProps> = ({
   return (
     <Drawer isOpen={isOpen} onClose={onClose} title="Cài đặt Âm thanh & Giọng hát">
       <div className="space-y-6 text-[14px]">
-        {/* 1. Chọn Micro và Đồng hồ mức âm */}
+        {/* 1. Mẹo tối ưu độ trễ */}
+        <div className="p-3.5 rounded-[12px] bg-[var(--accent)]/10 border border-[var(--accent)]/30 text-[12px] flex items-start gap-2.5">
+          <Zap className="w-4 h-4 text-[var(--accent)] shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <span className="font-semibold text-[var(--accent)]">Mẹo loại bỏ cảm giác trễ tiếng:</span>
+            <p className="text-[var(--text-muted)] leading-relaxed">
+              Hãy chọn preset <strong>Siêu tốc (0 Trễ)</strong> và cắm tai nghe có dây. Tránh tai nghe Bluetooth để không bị trễ âm thanh phần cứng (150-300ms).
+            </p>
+          </div>
+        </div>
+
+        {/* 2. Chọn Micro và Đồng hồ mức âm */}
         <div className="space-y-3">
           <label className="text-[13px] font-semibold text-[var(--text)] flex items-center gap-1.5">
             <Mic className="w-4 h-4 text-[var(--live)]" /> Thiết bị Microphone
@@ -106,7 +129,7 @@ export const VoiceControlPanel: React.FC<VoiceControlPanelProps> = ({
           </div>
         </div>
 
-        {/* 2. Monitor: Nghe giọng bản thân */}
+        {/* 3. Monitor: Nghe giọng bản thân */}
         <div className="p-3.5 rounded-[12px] bg-[var(--surface-raised)] border border-[var(--border)] space-y-2">
           <Toggle
             checked={voiceSettings.monitorEnabled}
@@ -124,31 +147,110 @@ export const VoiceControlPanel: React.FC<VoiceControlPanelProps> = ({
           )}
         </div>
 
-        {/* 3. Preset hiệu ứng giọng */}
-        <div className="space-y-2">
-          <label className="text-[13px] font-semibold text-[var(--text)] flex items-center gap-1.5">
-            <Sparkles className="w-4 h-4 text-[var(--accent)]" /> Preset hiệu ứng giọng
+        {/* 4. Preset hiệu ứng giọng */}
+        <div className="space-y-2.5">
+          <label className="text-[13px] font-semibold text-[var(--text)] flex items-center justify-between">
+            <span className="flex items-center gap-1.5">
+              <Sparkles className="w-4 h-4 text-[var(--accent)]" /> Preset hiệu ứng giọng
+            </span>
+            {activePreset === "zeroDelay" && (
+              <span className="text-[11px] font-semibold text-[var(--accent)] px-2 py-0.5 rounded-full bg-[var(--accent)]/10 border border-[var(--accent)]/20">
+                Khuyên dùng
+              </span>
+            )}
           </label>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {(Object.keys(VOICE_PRESETS) as PresetKey[]).map((key) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => handleSelectPreset(key)}
-                className={`py-2 px-3 rounded-[8px] border text-[13px] font-medium transition-all cursor-pointer ${
-                  activePreset === key
-                    ? "bg-[var(--accent)] text-[var(--bg)] font-bold border-transparent"
-                    : "bg-[var(--surface-raised)] border-[var(--border)] text-[var(--text)] hover:border-[var(--text-muted)]"
-                }`}
-              >
-                {VOICE_PRESETS[key].name}
-              </button>
-            ))}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {(Object.keys(VOICE_PRESETS) as PresetKey[]).map((key) => {
+              const isSelected = activePreset === key;
+              const isZero = key === "zeroDelay";
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => handleSelectPreset(key)}
+                  className={`py-2 px-2.5 rounded-[8px] border text-[12.5px] font-medium transition-all cursor-pointer text-center relative flex items-center justify-center gap-1.5 ${
+                    isSelected
+                      ? "bg-[var(--accent)] text-[var(--bg)] font-bold border-transparent shadow-sm"
+                      : "bg-[var(--surface-raised)] border-[var(--border)] text-[var(--text)] hover:border-[var(--text-muted)]"
+                  }`}
+                >
+                  {isZero && <Zap className="w-3.5 h-3.5 shrink-0" />}
+                  <span>{VOICE_PRESETS[key].name}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        {/* 4. Các núm chỉnh chi tiết */}
+        {/* 5. Cơ chế Chống ồn & Tăng cường giọng nói */}
+        <div className="p-3.5 rounded-[12px] bg-[var(--surface-raised)] border border-[var(--border)] space-y-3">
+          <div className="flex items-center gap-1.5 pb-1 border-b border-[var(--border)]">
+            <ShieldCheck className="w-4 h-4 text-[var(--score)]" />
+            <span className="text-[13px] font-semibold text-[var(--text)]">
+              Chống ồn & Tăng cường giọng hát
+            </span>
+          </div>
+
+          <Toggle
+            checked={Boolean(voiceSettings.noiseSuppression)}
+            onChange={(checked) => {
+              setActivePreset("custom");
+              onUpdateVoiceSettings({ noiseSuppression: checked });
+            }}
+            label="Khử ồn & Tạp âm AI"
+            description="Lọc sạch tiếng quạt, gió, ù nền và tạp âm phòng"
+          />
+
+          <Toggle
+            checked={Boolean(voiceSettings.echoCancellation)}
+            onChange={(checked) => {
+              setActivePreset("custom");
+              onUpdateVoiceSettings({ echoCancellation: checked });
+            }}
+            label="Chống hú & Khử tiếng vọng loa"
+            description="Ngăn âm thanh loa dội ngược lại micro"
+          />
+
+          <Toggle
+            checked={Boolean(voiceSettings.voiceEnhance)}
+            onChange={(checked) => {
+              setActivePreset("custom");
+              onUpdateVoiceSettings({ voiceEnhance: checked });
+            }}
+            label="Tăng cường giọng hát (Vocal Presence)"
+            description="Nâng dải 3.5kHz giúp giọng hát sáng, dày và nổi bật"
+          />
+
+          <Toggle
+            checked={Boolean(voiceSettings.noiseGateEnabled)}
+            onChange={(checked) => {
+              setActivePreset("custom");
+              onUpdateVoiceSettings({ noiseGateEnabled: checked });
+            }}
+            label="Cổng cắt ồn thông minh (Noise Gate)"
+            description="Tự động ngắt mic khi ngừng hát, triệt tiêu tiếng thở và xì nền"
+          />
+        </div>
+
+        {/* 6. Các núm chỉnh chi tiết */}
         <div className="space-y-4 pt-2 border-t border-[var(--border)]">
+          <div className="flex items-center gap-1.5 pb-1 text-[13px] font-semibold text-[var(--text)]">
+            <Sliders className="w-4 h-4 text-[var(--accent)]" /> Tinh chỉnh hiệu ứng
+          </div>
+
+          <Slider
+            label="Độ trễ lặp lại vang (Echo Delay)"
+            valueDisplay={`${Math.round(voiceSettings.echoDelaySec * 1000)} ms`}
+            value={voiceSettings.echoDelaySec * 1000}
+            min={50}
+            max={350}
+            step={10}
+            onChange={(v) => {
+              setActivePreset("custom");
+              onUpdateVoiceSettings({ echoDelaySec: v / 1000 });
+            }}
+          />
+
           <Slider
             label="Độ vang lặp lại (Echo Wet)"
             valueDisplay={`${Math.round(voiceSettings.echoWet * 100)}%`}
@@ -184,10 +286,26 @@ export const VoiceControlPanel: React.FC<VoiceControlPanelProps> = ({
               onUpdateVoiceSettings({ highGain: v });
             }}
           />
+
+          <Slider
+            label="Âm trung (Mid EQ)"
+            valueDisplay={`${voiceSettings.midGain > 0 ? "+" : ""}${voiceSettings.midGain} dB`}
+            value={voiceSettings.midGain}
+            min={-8}
+            max={8}
+            onChange={(v) => {
+              setActivePreset("custom");
+              onUpdateVoiceSettings({ midGain: v });
+            }}
+          />
         </div>
 
-        {/* 5. Hai thanh âm lượng riêng: Nhạc & Giọng */}
+        {/* 7. Hai thanh âm lượng riêng: Nhạc & Giọng */}
         <div className="space-y-4 pt-2 border-t border-[var(--border)]">
+          <div className="flex items-center gap-1.5 pb-1 text-[13px] font-semibold text-[var(--text)]">
+            <Volume2 className="w-4 h-4 text-[var(--accent)]" /> Âm lượng & Bù trễ
+          </div>
+
           <Slider
             label="Âm lượng nhạc nền"
             valueDisplay={`${Math.round(musicVolume * 100)}%`}
